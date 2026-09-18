@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Conflict, MergedBlock, Resolution, Side } from '../lib/merge';
 import { diffTokens } from '../lib/diff';
 import { DiffText } from './DiffText';
+import { AnnotatedText, type TextAnnotation } from './AnnotatedText';
 import { CHOICE_LABEL, CONFLICT_TYPE_LABEL } from './ConflictSidebar';
 import { SIDE_FULL_LABEL } from './Badges';
 
@@ -11,6 +12,9 @@ interface ConflictCardProps {
   resolution: Resolution | undefined;
   active: boolean;
   highlighted: boolean;
+  /** 冲突解决后挂接在该块上的批注区间（未解决时批注一律脱离，不传） */
+  annotations?: TextAnnotation[];
+  onCommentMarkClick?: (id: string) => void;
   onResolve: (id: string, choice: 'brand' | 'legal' | 'base' | 'manual', manualText?: string) => void;
   onUnresolve: (id: string) => void;
 }
@@ -71,6 +75,8 @@ export function ConflictCard({
   resolution,
   active,
   highlighted,
+  annotations = [],
+  onCommentMarkClick,
   onResolve,
   onUnresolve,
 }: ConflictCardProps) {
@@ -94,6 +100,7 @@ export function ConflictCard({
         highlighted ? 'highlighted' : ''
       }`}
       data-base-idx={c.baseIdx}
+      data-comment-scope={resolved ? block.id : undefined}
     >
       <div className="conflict-header">
         <span className="conflict-status-icon" aria-hidden>
@@ -151,11 +158,19 @@ export function ConflictCard({
               </span>
             </p>
           ) : (
-            <p className="card-text">
+            <p className="card-text cm-selectable">
               {resolution.choice === 'base' ? (
-                c.baseText
+                <AnnotatedText
+                  text={c.baseText}
+                  annotations={annotations}
+                  onAnnotationClick={onCommentMarkClick}
+                />
               ) : (
-                <DiffText parts={diffTokens(c.baseText, chosenText ?? '')} />
+                <AnnotatedText
+                  parts={diffTokens(c.baseText, chosenText ?? '')}
+                  annotations={annotations}
+                  onAnnotationClick={onCommentMarkClick}
+                />
               )}
             </p>
           )}

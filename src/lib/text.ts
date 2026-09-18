@@ -23,6 +23,28 @@ export function tokenize(t: string): string[] {
   return t.match(TOKEN_RE) ?? [];
 }
 
+export interface TokenSpan {
+  tok: string;
+  start: number;
+  end: number;
+}
+
+/** 与 tokenize 相同的切分规则，同时返回每个词元在原文中的字符区间。 */
+export function tokenizeWithOffsets(t: string): TokenSpan[] {
+  const re = new RegExp(TOKEN_RE.source, 'g');
+  const out: TokenSpan[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(t)) !== null) {
+    out.push({ tok: m[0], start: m.index, end: m.index + m[0].length });
+  }
+  return out;
+}
+
+/** 内容词元（去掉空白）及其在原文中的字符区间，供批注选区与渲染共用坐标。 */
+export function contentTokenSpans(t: string): TokenSpan[] {
+  return tokenizeWithOffsets(t).filter((s) => s.tok.trim().length > 0);
+}
+
 /** 非空白词（用于相似度计算，忽略纯空白差异）。 */
 export function contentTokens(t: string): string[] {
   return tokenize(t).filter((tok) => tok.trim().length > 0);
