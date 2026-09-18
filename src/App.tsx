@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useWorkbench } from './state/useWorkbench';
 import { exportMergedText } from './lib/merge';
+import { makeAnchorAt } from './lib/annotation';
 import { Toolbar } from './components/Toolbar';
 import { SummaryBar } from './components/SummaryBar';
 import { ConflictSidebar } from './components/ConflictSidebar';
+import { AnnotationSidebar, type ResolvedAnnotation } from './components/AnnotationSidebar';
 import { SourcePane } from './components/SourcePane';
 import { MergedPane } from './components/MergedPane';
+import { DEMO_BRAND_MOVED } from './sample';
 
 export default function App() {
   const wb = useWorkbench();
   const { merge } = wb;
   const [activeConflict, setActiveConflict] = useState(0);
   const [highlightBaseIdx, setHighlightBaseIdx] = useState<number | null>(null);
+  const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
+  const [reanchoringId, setReanchoringId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const conflicts = merge.conflicts;
@@ -80,6 +85,98 @@ export default function App() {
     URL.revokeObjectURL(url);
   }, [merge]);
 
+  const blockByKey = useCallback(
+    (key: string) => merge.blocks.find((b) => b.identityKey === key) ?? null,
+    [merge.blocks],
+  );
+
+  const attachmentById = new Map(wb.attachments.map((t) => [t.annotationId, t]));
+  const annotationById = new Map(wb.annotations.map((a) => [a.id, a]));
+  const annotationEntries: ResolvedAnnotation[] = wb.annotations.map((a) => ({
+    annotation: a,
+    attachment: attachmentById.get(a.id)!,
+  }));
+
+  const scrollMarkIntoView = useCallback((id: string) => {
+    requestAnimationFrame(() => {
+      // 批注 id 为 [a-z0-9-]，本身可直接用作属性选择器；CSS.escape 仅作兼容兜底
+      const safeId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id;
+      document
+        .querySelector(`[data-annotation-anchor="${safeId}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }, []);
+
+  // 从批注列表跳回原文：已挂接滚到高亮；冲突态滚到冲突卡；其余滚到所在块
+  const jumpToAnnotation = useCallback(
+    (entry: ResolvedAnnotation) => {
+      const { annotation: a, attachment: t } = entry;
+      setActiveAnnotationId(a.id);
+      const block = blockByKey(a.anchor.blockKey);
+      if (t.status === 'attached') {
+        scrollMarkIntoView(a.id);
+        if (block?.baseIdx !== null && block?.baseIdx !== undefined) setHighlightBaseIdx(block.baseIdx);
+      } else if (block?.conflictId) {
+        document
+          .getElementById(`conflict-${block.conflictId}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else if (block) {
+        requestAnimationFrame(() => {
+          const el = document.querySelector(
+            `.pane-merged [data-base-idx="${block.baseIdx ?? ''}"]`,
+          );
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      } else {
+        scrollMarkIntoView(a.id);
+      }
+    },
+    [blockByKey, scrollMarkIntoView],
+  );
+
+  const handleAddAnnotation = useCallback(
+    (blockKey: string, start: number, end: number, note: string) => {
+      const block = blockByKey(blockKey);
+      if (!block) return;
+      wb.addAnnotation(makeAnchorAt(blockKey, block.text, start, end), note);
+    },
+    [blockByKey, wb],
+  );
+
+  const handleConfirmReanchor = useCallback(
+    (annotationId: string, blockKey: string, start: number, end: number) => {
+      const block = blockByKey(blockKey);
+      if (!block) return;
+      wb.reanchorAnnotationAt(annotationId, blockKey, block.text, start, end);
+      setReanchoringId(null);
+      setActiveAnnotationId(annotationId);
+      setTimeout(() => scrollMarkIntoView(annotationId), 0);
+    },
+    [blockByKey, wb, scrollMarkIntoView],
+  );
+
+  const handlePickCandidate = useCallback(
+    (id: string, blockKey: string, start: number, end: number) => {
+      handleConfirmReanchor(id, blockKey, start, end);
+    },
+    [handleConfirmReanchor],
+  );
+
+  const handleAnnotationClick = useCallback(
+    (id: string) => {
+      setActiveAnnotationId(id);
+      const entry = annotationById.has(id)
+        ? { annotation: annotationById.get(id)!, attachment: attachmentById.get(id)! }
+        : null;
+      if (entry) jumpToAnnotation(entry);
+    },
+    [annotationById, attachmentById, jumpToAnnotation],
+  );
+
+  const handleDemoMove = useCallback(() => {
+    wb.setBrandText(DEMO_BRAND_MOVED);
+  }, [wb]);
+
   return (
     <div className="app">
       <Toolbar
@@ -112,13 +209,16 @@ export default function App() {
         <span className="badge badge-moved">
           <i>⇄</i>移动
         </span>
+        <span className="badge badge-annotation">
+          <i>▣</i>批注
+        </span>
         <span>
           <del>删除线</del>＝删去的文字
         </span>
         <span>
           <ins>下划线</ins>＝新增的文字
         </span>
-        <span className="legend-tip">点击合并结果中的段落，可在两侧原稿中定位</span>
+        <span className="legend-tip">选中合并结果中的文字可添加批注；批注不会进入复制/下载的正文</span>
       </div>
       <div className="main">
         <ConflictSidebar
@@ -161,11 +261,36 @@ export default function App() {
             resolutions={wb.resolutions}
             highlightBaseIdx={highlightBaseIdx}
             activeConflictId={conflicts[activeConflict]?.id ?? null}
+            annotations={wb.annotations}
+            attachments={wb.attachments}
+            activeAnnotationId={activeAnnotationId}
+            reanchoringId={reanchoringId}
             onResolve={wb.resolve}
             onUnresolve={wb.unresolve}
             onHighlight={setHighlightBaseIdx}
+            onAddAnnotation={handleAddAnnotation}
+            onConfirmReanchor={handleConfirmReanchor}
+            onCancelReanchor={() => setReanchoringId(null)}
+            onAnnotationClick={handleAnnotationClick}
           />
         </div>
+        <AnnotationSidebar
+          entries={annotationEntries}
+          merge={merge}
+          activeId={activeAnnotationId}
+          reanchoringId={reanchoringId}
+          onJump={jumpToAnnotation}
+          onEdit={wb.editAnnotation}
+          onDelete={wb.deleteAnnotation}
+          onStartReanchor={(id) => {
+            setReanchoringId(id);
+            setActiveAnnotationId(id);
+          }}
+          onCancelReanchor={() => setReanchoringId(null)}
+          onPickCandidate={handlePickCandidate}
+          onSeedDemo={wb.seedDemoAnnotations}
+          onDemoMove={handleDemoMove}
+        />
       </div>
     </div>
   );

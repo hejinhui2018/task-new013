@@ -8,6 +8,9 @@
  * - 段落移动 + 内容修改（品牌把第 6 段数据段前移到导语之后，法务同时修订其措辞）
  */
 
+import { makeAnchorAt, type AnnotationAnchor } from './lib/annotation';
+import type { MergeResult } from './lib/merge';
+
 const BASE = [
   '星澜科技与北辰银行联合宣布达成战略合作',
   '2026年9月8日，上海——星澜科技与北辰银行今日联合宣布，双方正式签署战略合作协议，共同推出面向中小企业的智能财税金融服务。',
@@ -62,3 +65,83 @@ const LEGAL = [
 export const SAMPLE_BASE = BASE.join('\n\n');
 export const SAMPLE_BRAND = BRAND.join('\n\n');
 export const SAMPLE_LEGAL = LEGAL.join('\n\n');
+
+/**
+ * 演示变体：品牌版把媒体垂询段（底稿第 10 段，b9，双方均未改动）移到文首。
+ * 法务版没有移动该段 → 自动合并、不产生新冲突，用于演示批注随段落移动跟随。
+ * 原有数据段（b5）移动与两个既有冲突均不受影响。
+ */
+const BRAND_MOVED = [
+  BASE[9], // 媒体垂询段移到文首
+  BASE[0],
+  BASE[1],
+  BASE[5],
+  BRAND[3],
+  BASE[3],
+  BRAND[5],
+  BASE[7],
+  BASE[8],
+  BRAND[9], // 品牌新增的"成长伙伴计划"
+];
+export const DEMO_BRAND_MOVED = BRAND_MOVED.join('\n\n');
+
+export interface DemoAnchorSpec {
+  anchor: AnnotationAnchor;
+  note: string;
+}
+
+/** 在指定来源文本中查找引文并构造锚点；找不到时跳过该条。 */
+function anchorFromQuote(
+  merge: MergeResult,
+  blockKey: string,
+  quote: string,
+  note: string,
+  /** 指纹来源文本，默认取当前合并块文本；传入底稿原文可模拟"改稿前留下的批注" */
+  sourceText?: string,
+): DemoAnchorSpec | null {
+  const block = merge.blocks.find((b) => b.identityKey === blockKey);
+  if (!block) return null;
+  const text = sourceText ?? block.text;
+  const idx = text.indexOf(quote);
+  if (idx < 0) return null;
+  return { anchor: makeAnchorAt(blockKey, text, idx, idx + quote.length), note };
+}
+
+/**
+ * 构造一组覆盖全部场景的演示批注种子：
+ * - b9 媒体垂询段：普通挂接，随后用"演示：品牌再移动一段"按钮可看到它随段落移到文首；
+ * - b8 北辰简介：引文按底稿原文选取，法务单侧加了"约"字，靠模糊匹配跟随；
+ * - b4 行长引言：未解决 edit-edit 冲突 → conflict，采用法务版后自动恢复；
+ * - b6 免责声明：未解决 delete-edit 冲突 → conflict，裁决采用品牌版删除后变待重挂。
+ */
+export function buildDemoAnchors(merge: MergeResult): DemoAnchorSpec[] {
+  const specs: Array<DemoAnchorSpec | null> = [
+    anchorFromQuote(
+      merge,
+      'b9',
+      'pr@xinglan.example',
+      '【跟随演示】这条批注挂在媒体垂询段上。点击"演示：品牌再移动一段"后，该段移到文首，批注会自动跟到新位置。',
+    ),
+    anchorFromQuote(
+      merge,
+      'b8',
+      '两百万个人客户和九万企业客户',
+      '【单侧改稿演示】法务只在"九万"前加了一个"约"字，引文与现文已不完全一致，批注经模糊匹配仍挂在原句上。',
+      BASE[8],
+    ),
+    anchorFromQuote(
+      merge,
+      'b4',
+      '我们期待与星澜科技共同探索金融科技的新场景',
+      '【冲突脱离 / 解决恢复】行长引言双方都改了，批注暂离正文；把冲突裁决为"采用法务版"后，这句话自动重新挂回。',
+    ),
+    anchorFromQuote(
+      merge,
+      'b6',
+      '实际结果可能因市场变化而与预期存在差异',
+      '【删除待重挂】若把该冲突裁决为"采用品牌版"（删除整段），批注变待重挂，可手动挂到新文字上。',
+      BASE[6],
+    ),
+  ];
+  return specs.filter((s): s is DemoAnchorSpec => s !== null);
+}

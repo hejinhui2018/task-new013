@@ -2,8 +2,11 @@ import { useState } from 'react';
 import type { Conflict, MergedBlock, Resolution, Side } from '../lib/merge';
 import { diffTokens } from '../lib/diff';
 import { DiffText } from './DiffText';
+import { AnnotatedDiffText } from './AnnotatedDiffText';
 import { CHOICE_LABEL, CONFLICT_TYPE_LABEL } from './ConflictSidebar';
 import { SIDE_FULL_LABEL } from './Badges';
+import type { Annotation } from '../lib/annotation';
+import type { TextMark } from './AnnotatedText';
 
 interface ConflictCardProps {
   conflict: Conflict;
@@ -11,8 +14,13 @@ interface ConflictCardProps {
   resolution: Resolution | undefined;
   active: boolean;
   highlighted: boolean;
+  marks: TextMark[];
+  conflictAnnotations: Annotation[];
+  conflictReasonOf: (id: string) => string;
+  activeAnnotationId: string | null;
   onResolve: (id: string, choice: 'brand' | 'legal' | 'base' | 'manual', manualText?: string) => void;
   onUnresolve: (id: string) => void;
+  onAnnotationClick: (id: string) => void;
 }
 
 function anchorLabel(anchor: number): string {
@@ -71,8 +79,13 @@ export function ConflictCard({
   resolution,
   active,
   highlighted,
+  marks,
+  conflictAnnotations,
+  conflictReasonOf,
+  activeAnnotationId,
   onResolve,
   onUnresolve,
+  onAnnotationClick,
 }: ConflictCardProps) {
   const [manual, setManual] = useState('');
   const resolved = resolution !== undefined;
@@ -106,6 +119,29 @@ export function ConflictCard({
           {resolved ? `已解决 · ${CHOICE_LABEL[resolution.choice]}` : '待解决'}
         </span>
       </div>
+
+      {/* 冲突未解决时，挂在此段的批注不猜位置，集中在横幅中提示 */}
+      {!resolved && conflictAnnotations.length > 0 && (
+        <div className="ann-conflict-banner">
+          <div className="ann-conflict-banner-title">
+            <i>⚠</i> {conflictAnnotations.length} 条批注随此冲突暂时脱离正文，冲突解决后自动重新判断：
+          </div>
+          <ul>
+            {conflictAnnotations.map((a) => (
+              <li key={a.id}>
+                <button
+                  className={`ann-banner-item${activeAnnotationId === a.id ? ' is-active' : ''}`}
+                  onClick={() => onAnnotationClick(a.id)}
+                >
+                  <span className="ann-banner-quote">「{a.anchor.exact}」</span>
+                  <span className="ann-banner-note">{a.note}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {conflictAnnotations[0] && <p className="ann-reason">{conflictReasonOf(conflictAnnotations[0].id)}</p>}
+        </div>
+      )}
 
       {!resolved ? (
         <div className="conflict-body">
@@ -145,17 +181,43 @@ export function ConflictCard({
       ) : (
         <div className="conflict-body">
           {chosenText === null ? (
-            <p className="resolved-note">
-              <span className="badge badge-deleted">
-                <i>✕</i>该段已按{SIDE_FULL_LABEL[resolution.choice as Side] ?? ''}意见删除
-              </span>
-            </p>
+            <div>
+              <p className="resolved-note">
+                <span className="badge badge-deleted">
+                  <i>✕</i>该段已按{SIDE_FULL_LABEL[resolution.choice as Side] ?? ''}意见删除
+                </span>
+              </p>
+              {conflictAnnotations.length > 0 && (
+                <div className="ann-problem-strip">
+                  {conflictAnnotations.map((a) => (
+                    <button
+                      key={a.id}
+                      className={`ann-chip ann-chip-detached${activeAnnotationId === a.id ? ' is-active' : ''}`}
+                      onClick={() => onAnnotationClick(a.id)}
+                      title={conflictReasonOf(a.id)}
+                    >
+                      ✸ 批注待重挂：{a.note.length > 12 ? `${a.note.slice(0, 12)}…` : a.note}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : (
-            <p className="card-text">
+            <p className="card-text annotation-target" data-annotation-target={block.identityKey}>
               {resolution.choice === 'base' ? (
-                c.baseText
+                <AnnotatedDiffText
+                  parts={[{ type: 'same', text: c.baseText }]}
+                  finalText={c.baseText}
+                  marks={marks}
+                  onMarkClick={onAnnotationClick}
+                />
               ) : (
-                <DiffText parts={diffTokens(c.baseText, chosenText ?? '')} />
+                <AnnotatedDiffText
+                  parts={diffTokens(c.baseText, chosenText ?? '')}
+                  finalText={chosenText ?? ''}
+                  marks={marks}
+                  onMarkClick={onAnnotationClick}
+                />
               )}
             </p>
           )}
@@ -163,6 +225,14 @@ export function ConflictCard({
             <div className="card-meta">
               <span className="badge badge-moved">
                 <i>⇄</i>第{block.moved.fromBaseIdx + 1}段 → {anchorLabel(block.moved.anchorBaseIdx)}
+              </span>
+            </div>
+          )}
+          {marks.length > 0 && (
+            <div className="card-meta">
+              <span className="badge badge-annotation">
+                <i>▣</i>
+                {marks.length} 条批注已随解决结果重新挂回
               </span>
             </div>
           )}

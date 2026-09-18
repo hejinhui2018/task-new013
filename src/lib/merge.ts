@@ -49,6 +49,8 @@ export interface MoveInfo {
 
 export interface MergedBlock {
   id: string;
+  /** 跨重新合并稳定的身份键：底稿段落为 `b<下标>`，新增段落为 `ins:<锚点>::<归一化文本>` */
+  identityKey: string;
   /** 来源底稿段落下标；新增段落为 null */
   baseIdx: number | null;
   /** 应用裁决后的最终文本（未解决冲突为默认文本） */
@@ -238,6 +240,7 @@ function buildConflictItem(
     order: i,
     block: {
       id: `b${i}`,
+      identityKey: `b${i}`,
       baseIdx: i,
       text,
       status,
@@ -344,6 +347,7 @@ export function buildMergedDocument(
       order: i,
       block: {
         id: `b${i}`,
+        identityKey: `b${i}`,
         baseIdx: i,
         text,
         status: 'auto',
@@ -392,6 +396,7 @@ export function buildMergedDocument(
       order: 10000 + insCounter,
       block: {
         id: `ins${insCounter}`,
+        identityKey: `ins:${ins.anchor}::${normalizeText(ins.text)}`,
         baseIdx: null,
         text: ins.text,
         status: 'auto',
